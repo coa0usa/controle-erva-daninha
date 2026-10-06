@@ -1,3 +1,20 @@
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-app.js";
+import { getFirestore, collection, addDoc, getDocs, deleteDoc, doc, updateDoc } from "https://www.gstatic.com/firebasejs/10.8.1/firebase-firestore.js";
+
+const firebaseConfig = {
+  apiKey: "AIzaSyAZv_7DMG0sGKxTW0XpG1S41S6zAdeHfDg",
+  authDomain: "levantamento-erva-daninha.firebaseapp.com",
+  projectId: "levantamento-erva-daninha",
+  storageBucket: "levantamento-erva-daninha.firebasestorage.app",
+  messagingSenderId: "684274708603",
+  appId: "1:684274708603:web:9a85b97f58f2ce936472de",
+  measurementId: "G-VZVRBJ9361"
+};
+
+// Initialize Firebase
+const app = initializeApp(firebaseConfig);
+const db = getFirestore(app);
+
 document.addEventListener('DOMContentLoaded', () => {
     // --- CLOCK AND DATE ---
     function updateClock() {
@@ -7,13 +24,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const timeStr = now.toLocaleTimeString('pt-BR', { hour12: false });
         document.getElementById('currentTime').textContent = timeStr;
         
-        // Dates
+        // Date
         const dateOptions = { day: '2-digit', month: '2-digit', year: 'numeric' };
         document.getElementById('currentDate').textContent = now.toLocaleDateString('pt-BR', dateOptions);
-        
-        const yesterday = new Date(now);
-        yesterday.setDate(yesterday.getDate() - 1);
-        document.getElementById('yesterdayDate').textContent = yesterday.toLocaleDateString('pt-BR', dateOptions);
     }
     
     setInterval(updateClock, 1000);
@@ -129,15 +142,20 @@ document.addEventListener('DOMContentLoaded', () => {
     const form = document.getElementById('weedForm');
     const recordsBody = document.getElementById('recordsBody');
     let editingId = null;
+    let currentRecords = [];
+    let currentVariedades = [];
+    let currentPlantas = [];
 
     loadRecords();
 
-    form.addEventListener('submit', (e) => {
+    form.addEventListener('submit', async (e) => {
         e.preventDefault();
+        const submitBtn = document.querySelector('#weedForm button[type="submit"]');
+        submitBtn.disabled = true;
+        submitBtn.textContent = "Salvando...";
         
         const formData = new FormData(form);
         const record = {
-            id: editingId ? editingId : Date.now(),
             codFz: formData.get('codFz'),
             sigla: formData.get('sigla'),
             bloco: formData.get('bloco'),
@@ -146,48 +164,80 @@ document.addEventListener('DOMContentLoaded', () => {
             plantaDaninha: formData.get('plantaDaninha'),
             latitude: formData.get('latitude'),
             longitude: formData.get('longitude'),
-            date: editingId ? formData.get('originalDate') : new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'})
+            date: editingId ? formData.get('originalDate') : new Date().toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'}),
+            timestamp: editingId ? Date.now() : Date.now()
         };
 
         const file = formData.get('imagem');
         if (file && file.size > 0) {
             const reader = new FileReader();
             reader.onload = function(e) {
-                record.image = e.target.result;
-                saveRecord(record);
+                // Compress image before saving
+                const img = new Image();
+                img.onload = async function() {
+                    const canvas = document.createElement('canvas');
+                    const MAX_WIDTH = 800;
+                    const MAX_HEIGHT = 800;
+                    let width = img.width;
+                    let height = img.height;
+
+                    if (width > height) {
+                        if (width > MAX_WIDTH) {
+                            height *= MAX_WIDTH / width;
+                            width = MAX_WIDTH;
+                        }
+                    } else {
+                        if (height > MAX_HEIGHT) {
+                            width *= MAX_HEIGHT / height;
+                            height = MAX_HEIGHT;
+                        }
+                    }
+
+                    canvas.width = width;
+                    canvas.height = height;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, width, height);
+                    
+                    // Compress as JPEG
+                    record.image = canvas.toDataURL('image/jpeg', 0.6);
+                    await saveRecord(record);
+                }
+                img.src = e.target.result;
             }
             reader.readAsDataURL(file);
         } else {
             // Se estiver editando e não enviou nova imagem, manter a antiga
             if (editingId) {
-                let records = JSON.parse(localStorage.getItem('weedRecordsLight') || '[]');
-                let oldRecord = records.find(r => r.id === editingId);
+                let oldRecord = currentRecords.find(r => r.id === editingId);
                 if (oldRecord && oldRecord.image) {
                     record.image = oldRecord.image;
                 }
             }
-            saveRecord(record);
+            await saveRecord(record);
         }
     });
 
-    function saveRecord(record) {
-        let records = JSON.parse(localStorage.getItem('weedRecordsLight') || '[]');
-        
-        if (editingId) {
-            const index = records.findIndex(r => r.id === editingId);
-            if (index !== -1) {
-                records[index] = record;
+    async function saveRecord(record) {
+        try {
+            if (editingId) {
+                const docRef = doc(db, "levantamentos", editingId);
+                await updateDoc(docRef, record);
+                alert("Levantamento atualizado com sucesso!");
+            } else {
+                await addDoc(collection(db, "levantamentos"), record);
+                alert("Levantamento salvo com sucesso!");
             }
-            alert("Levantamento atualizado com sucesso!");
-        } else {
-            records.unshift(record);
-            alert("Levantamento salvo com sucesso!");
+        } catch (e) {
+            console.error(e);
+            alert("Erro ao salvar! Verifique a conexão com a internet ou se a foto não está muito grande.");
+        } finally {
+            const submitBtn = document.querySelector('#weedForm button[type="submit"]');
+            submitBtn.disabled = false;
+            submitBtn.textContent = editingId ? "Atualizar Levantamento" : "Salvar Levantamento";
         }
-
-        localStorage.setItem('weedRecordsLight', JSON.stringify(records));
         
         resetFormState();
-        loadRecords();
+        await loadRecords();
         
         // Retornar para a aba da base de dados
         document.querySelector('.tab-btn[data-target="basedados-tab"]').click();
@@ -221,68 +271,85 @@ document.addEventListener('DOMContentLoaded', () => {
         window.scrollTo({ top: 0, behavior: 'smooth' });
     });
 
-    function loadRecords() {
-        let records = JSON.parse(localStorage.getItem('weedRecordsLight') || '[]');
-        recordsBody.innerHTML = '';
+    async function loadRecords() {
+        recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Carregando registros...</td></tr>';
         
-        if (records.length === 0) {
-            recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Nenhum registro encontrado.</td></tr>';
-            return;
-        }
-
-        records.forEach(record => {
-            const tr = document.createElement('tr');
+        try {
+            const querySnapshot = await getDocs(collection(db, "levantamentos"));
+            let records = [];
+            querySnapshot.forEach((doc) => {
+                records.push({ id: doc.id, ...doc.data() });
+            });
             
-            // Location
-            let locationHtml = '<span class="text-muted">N/A</span>';
-            if (record.latitude && record.longitude) {
-                locationHtml = `<a href="https://www.google.com/maps?q=${record.latitude},${record.longitude}" target="_blank" class="table-link">🌍 Ver Mapa</a>`;
+            // Sort descending by timestamp
+            records.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            currentRecords = records;
+
+            recordsBody.innerHTML = '';
+            
+            if (records.length === 0) {
+                recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Nenhum registro encontrado.</td></tr>';
+                return;
             }
 
-            // Image
-            let imageHtml = '<span class="text-muted">N/A</span>';
-            if (record.image) {
-                imageHtml = `<span class="table-link" onclick="window.openImageModal('${record.image}')">📷 Ver Foto</span>`;
-            }
+            records.forEach(record => {
+                const tr = document.createElement('tr');
+                
+                // Location
+                let locationHtml = '<span class="text-muted">N/A</span>';
+                if (record.latitude && record.longitude) {
+                    locationHtml = `<a href="https://www.google.com/maps?q=${record.latitude},${record.longitude}" target="_blank" class="table-link">🌍 Ver Mapa</a>`;
+                }
 
-            // Actions
-            let actionsHtml = `
-                <div class="action-buttons">
-                    <button class="btn-icon btn-edit" onclick="window.editRecord(${record.id})" title="Editar">✏️</button>
-                    <button class="btn-icon btn-delete" onclick="window.deleteRecord(${record.id})" title="Excluir">🗑️</button>
-                </div>
-            `;
+                // Image
+                let imageHtml = '<span class="text-muted">N/A</span>';
+                if (record.image) {
+                    imageHtml = `<span class="table-link" onclick="window.openImageModal('${record.image}')">📷 Ver Foto</span>`;
+                }
 
-            tr.innerHTML = `
-                <td>${record.codFz}</td>
-                <td>${record.sigla}</td>
-                <td>${record.bloco}</td>
-                <td>${record.talhao}</td>
-                <td>${record.variedade}</td>
-                <td>${record.plantaDaninha}</td>
-                <td>${locationHtml}</td>
-                <td>${imageHtml}</td>
-                <td>${record.date}</td>
-                <td>${actionsHtml}</td>
-            `;
-            recordsBody.appendChild(tr);
-        });
+                // Actions
+                let actionsHtml = `
+                    <div class="action-buttons">
+                        <button class="btn-icon btn-edit" onclick="window.editRecord('${record.id}')" title="Editar">✏️</button>
+                        <button class="btn-icon btn-delete" onclick="window.deleteRecord('${record.id}')" title="Excluir">🗑️</button>
+                    </div>
+                `;
+
+                tr.innerHTML = `
+                    <td>${record.codFz || ''}</td>
+                    <td>${record.sigla || ''}</td>
+                    <td>${record.bloco || ''}</td>
+                    <td>${record.talhao || ''}</td>
+                    <td>${record.variedade || ''}</td>
+                    <td>${record.plantaDaninha || ''}</td>
+                    <td>${locationHtml}</td>
+                    <td>${imageHtml}</td>
+                    <td>${record.date || ''}</td>
+                    <td>${actionsHtml}</td>
+                `;
+                recordsBody.appendChild(tr);
+            });
+        } catch (e) {
+            console.error("Erro ao carregar registros", e);
+            recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Erro ao carregar registros. Verifique sua conexão.</td></tr>';
+        }
     }
 
     // --- CRUD ACTIONS ---
-    window.deleteRecord = function(id) {
+    window.deleteRecord = async function(id) {
         if (confirm("Tem certeza que deseja excluir este levantamento?")) {
-            let records = JSON.parse(localStorage.getItem('weedRecordsLight') || '[]');
-            records = records.filter(r => r.id !== id);
-            localStorage.setItem('weedRecordsLight', JSON.stringify(records));
-            loadRecords();
+            try {
+                await deleteDoc(doc(db, "levantamentos", id));
+                await loadRecords();
+            } catch (e) {
+                console.error(e);
+                alert("Erro ao excluir!");
+            }
         }
     }
 
     window.editRecord = function(id) {
-        let records = JSON.parse(localStorage.getItem('weedRecordsLight') || '[]');
-        let record = records.find(r => r.id === id);
-        
+        let record = currentRecords.find(r => r.id === id);
         if (!record) return;
 
         editingId = record.id;
@@ -352,4 +419,128 @@ document.addEventListener('DOMContentLoaded', () => {
             modal.style.display = "none";
         }
     }
+
+    // --- CADASTROS LOGIC (Variedades e Plantas Daninhas) ---
+    async function loadCadastros() {
+        try {
+            const varSnapshot = await getDocs(collection(db, "variedades"));
+            let variedades = [];
+            varSnapshot.forEach(doc => {
+                variedades.push({ id: doc.id, nome: doc.data().nome });
+            });
+            currentVariedades = variedades;
+
+            const plantaSnapshot = await getDocs(collection(db, "plantasDaninhas"));
+            let plantasDaninhas = [];
+            plantaSnapshot.forEach(doc => {
+                plantasDaninhas.push({ id: doc.id, nome: doc.data().nome });
+            });
+            currentPlantas = plantasDaninhas;
+
+            // Populate lists
+            const listaVariedade = document.getElementById('listaVariedade');
+            listaVariedade.innerHTML = '';
+            variedades.forEach(v => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${v.nome}</span> <button class="btn-icon btn-delete" onclick="window.deleteVariedade('${v.id}')">🗑️</button>`;
+                listaVariedade.appendChild(li);
+            });
+
+            const listaPlanta = document.getElementById('listaPlantaDaninha');
+            listaPlanta.innerHTML = '';
+            plantasDaninhas.forEach(p => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${p.nome}</span> <button class="btn-icon btn-delete" onclick="window.deletePlantaDaninha('${p.id}')">🗑️</button>`;
+                listaPlanta.appendChild(li);
+            });
+
+            // Populate select inputs in Formulario
+            const selectVariedade = document.getElementById('variedade');
+            const currentVar = selectVariedade.value;
+            selectVariedade.innerHTML = '<option value="" disabled selected>Selecione a Variedade</option>';
+            variedades.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.nome;
+                opt.textContent = v.nome;
+                selectVariedade.appendChild(opt);
+            });
+            if(currentVar) selectVariedade.value = currentVar;
+
+            const selectPlanta = document.getElementById('plantaDaninha');
+            const currentPlanta = selectPlanta.value;
+            selectPlanta.innerHTML = '<option value="" disabled selected>Selecione a Planta Daninha</option>';
+            plantasDaninhas.forEach(p => {
+                const opt = document.createElement('option');
+                opt.value = p.nome;
+                opt.textContent = p.nome;
+                selectPlanta.appendChild(opt);
+            });
+            if(currentPlanta) selectPlanta.value = currentPlanta;
+
+        } catch (e) {
+            console.error("Erro ao carregar cadastros", e);
+        }
+    }
+
+    window.addVariedade = async function() {
+        const input = document.getElementById('novaVariedade');
+        const val = input.value.trim();
+        if(!val) return;
+
+        // Verify if it already exists
+        if(currentVariedades.find(v => v.nome.toLowerCase() === val.toLowerCase())) {
+            alert("Esta variedade já está cadastrada!");
+            return;
+        }
+
+        try {
+            await addDoc(collection(db, "variedades"), { nome: val });
+            input.value = '';
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao adicionar variedade", e);
+        }
+    }
+
+    window.addPlantaDaninha = async function() {
+        const input = document.getElementById('novaPlantaDaninha');
+        const val = input.value.trim();
+        if(!val) return;
+
+        if(currentPlantas.find(p => p.nome.toLowerCase() === val.toLowerCase())) {
+            alert("Esta planta daninha já está cadastrada!");
+            return;
+        }
+
+        try {
+            await addDoc(collection(db, "plantasDaninhas"), { nome: val });
+            input.value = '';
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao adicionar planta daninha", e);
+        }
+    }
+
+    window.deleteVariedade = async function(id) {
+        if(!confirm(`Remover esta variedade?`)) return;
+        try {
+            await deleteDoc(doc(db, "variedades", id));
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao remover", e);
+        }
+    }
+
+    window.deletePlantaDaninha = async function(id) {
+        if(!confirm(`Remover esta planta daninha?`)) return;
+        try {
+            await deleteDoc(doc(db, "plantasDaninhas", id));
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao remover", e);
+        }
+    }
+
+    // Call loadCadastros on initialization
+    loadCadastros();
 });
