@@ -7,8 +7,8 @@ const firebaseConfig = {
   projectId: "levantamento-erva-daninha",
   storageBucket: "levantamento-erva-daninha.firebasestorage.app",
   messagingSenderId: "684274708603",
-  appId: "1:684274708603:web:9a85b97f58f2ce936472de",
-  measurementId: "G-VZVRBJ9361"
+  appId: "1:684274708603:web:1c902485a067291a6472de",
+  measurementId: "G-MSQRSTM08B"
 };
 
 // Initialize Firebase
