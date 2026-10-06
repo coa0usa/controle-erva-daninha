@@ -15,7 +15,7 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getFirestore(app);
 
-document.addEventListener('DOMContentLoaded', () => {
+
     // --- CLOCK AND DATE ---
     function updateClock() {
         const now = new Date();
@@ -543,4 +543,3 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Call loadCadastros on initialization
     loadCadastros();
-});
