@@ -78,6 +78,15 @@
                                 </select>
                             </div>
 
+                            <!-- CORTE -->
+                            <div class="input-group full-width">
+                                <label for="corte">CORTE</label>
+                                <select id="corte" name="corte" required>
+                                    <option value="" disabled selected>Selecione o Corte</option>
+                                    <!-- Options populated via JS -->
+                                </select>
+                            </div>
+
                             <!-- PLANTA DANINHA -->
                             <div class="input-group full-width">
                                 <label for="plantaDaninha">PLANTA DANINHA</label>
@@ -129,7 +138,7 @@
                 <div class="card-header flex-header">
                     <h2>Todos os Registros do Período</h2>
                     <div class="header-actions">
-                        <button class="btn-success"><i class="icon-excel"></i> Exportar Excel</button>
+                        <button type="button" id="exportExcelBtn" class="btn-success"><i class="icon-excel"></i> Exportar Excel</button>
                     </div>
                 </div>
                 <div class="card-body">
@@ -142,6 +151,7 @@
                                     <th>Bloco</th>
                                     <th>Talhão</th>
                                     <th>Variedade</th>
+                                    <th>Corte</th>
                                     <th>Planta Daninha</th>
                                     <th>Localização</th>
                                     <th>Imagem</th>
@@ -179,6 +189,18 @@
                             </ul>
                         </div>
 
+                        <!-- Cadastro Corte -->
+                        <div class="cadastro-card">
+                            <h3>Cadastrar Corte</h3>
+                            <div class="input-group" style="flex-direction: row; margin-top: 1rem; margin-bottom: 1rem;">
+                                <input type="text" id="novoCorte" placeholder="Ex: 1º Corte" style="flex: 1;">
+                                <button type="button" class="btn-success" onclick="addCorte()">Adicionar</button>
+                            </div>
+                            <ul class="cadastro-list" id="listaCorte">
+                                <!-- Preenchido via JS -->
+                            </ul>
+                        </div>
+
                         <!-- Cadastro Planta Daninha -->
                         <div class="cadastro-card">
                             <h3>Cadastrar Planta Daninha</h3>
@@ -208,6 +230,8 @@
 
     <!-- Leaflet JS -->
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+    <!-- ExcelJS (exportação .xlsx com imagens e links) -->
+    <script src="https://cdn.jsdelivr.net/npm/exceljs@4.4.0/dist/exceljs.min.js"></script>
     <script type="module" src="script.js"></script>
 </body>
 </html>

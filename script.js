@@ -7,8 +7,8 @@ const firebaseConfig = {
   projectId: "levantamento-erva-daninha",
   storageBucket: "levantamento-erva-daninha.firebasestorage.app",
   messagingSenderId: "684274708603",
-  appId: "1:684274708603:web:1c902485a067291a6472de",
-  measurementId: "G-MSQRSTM08B"
+  appId: "1:684274708603:web:9a85b97f58f2ce936472de",
+  measurementId: "G-VZVRBJ9361"
 };
 
 // Initialize Firebase
@@ -59,6 +59,9 @@ const db = getFirestore(app);
     // --- MAP & GEOLOCATION ---
     let map;
     let marker;
+    let shapeLayer;
+    let selectedShapeLayer;
+    let shapeFeatures = [];
     const getLocationBtn = document.getElementById('getLocationBtn');
     const locationStatus = document.getElementById('locationStatus');
     const latInput = document.getElementById('latitude');
@@ -72,12 +75,85 @@ const db = getFirestore(app);
                 subdomains: 'abcd',
                 maxZoom: 20
             }).addTo(map);
+
+            loadShapeOverlay();
             
             // Allow user to click on map to set location manually
             map.on('click', function(e) {
                 setMarker(e.latlng.lat, e.latlng.lng);
             });
         }
+    }
+
+    async function loadShapeOverlay() {
+        try {
+            const response = await fetch('./SANTAADELIA.geojson');
+            if (!response.ok) throw new Error(`HTTP ${response.status}`);
+            const geojson = await response.json();
+            shapeFeatures = geojson.features || [];
+            shapeLayer = L.geoJSON(geojson, {
+                style: { color: '#2563eb', weight: 1, opacity: 0.65, fillColor: '#3b82f6', fillOpacity: 0.08 },
+                onEachFeature: (feature, layer) => {
+                    const properties = feature.properties || {};
+                    const farm = properties.NOME_FAZ || properties.FAZENDA || 'Talhão';
+                    const field = properties.TALHAO ?? properties.DESC_TALHA ?? '';
+                    layer.bindTooltip(`${farm}${field !== '' ? ` · Talhão ${field}` : ''}`);
+                }
+            }).addTo(map);
+            if (latInput.value && lngInput.value) showShapeForLocation();
+        } catch (error) {
+            console.error('Não foi possível carregar o shape da Usina Santa Adélia:', error);
+            locationStatus.textContent = 'Shape indisponível';
+        }
+    }
+
+    function showShapeForLocation() {
+        if (!shapeLayer || !shapeFeatures.length) return;
+        const latitude = Number(latInput.value);
+        const longitude = Number(lngInput.value);
+        const farmCode = document.getElementById('codFz').value.trim();
+        const fieldCode = document.getElementById('talhao').value.trim();
+        const containsPoint = ring => {
+            let inside = false;
+            for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+                const [xi, yi] = ring[i];
+                const [xj, yj] = ring[j];
+                if (((yi > latitude) !== (yj > latitude)) &&
+                    longitude < ((xj - xi) * (latitude - yi)) / ((yj - yi) || Number.EPSILON) + xi) inside = !inside;
+            }
+            return inside;
+        };
+        const containsCoordinates = (geometry) => {
+            if (!geometry) return false;
+            if (geometry.type === 'Polygon') return containsPoint(geometry.coordinates[0]);
+            if (geometry.type === 'MultiPolygon') return geometry.coordinates.some(polygon => containsPoint(polygon[0]));
+            return false;
+        };
+        let matches = shapeFeatures.filter(feature => containsCoordinates(feature.geometry));
+
+        // GPS may fall just outside a boundary; use the entered farm and field as fallback.
+        if (!matches.length && farmCode && fieldCode) {
+            matches = shapeFeatures.filter(feature => {
+                const properties = feature.properties || {};
+                return String(properties.FAZENDA ?? '').trim() === farmCode &&
+                    String(properties.TALHAO ?? properties.DESC_TALHA ?? '').trim() === fieldCode;
+            });
+        }
+
+        if (selectedShapeLayer) map.removeLayer(selectedShapeLayer);
+        if (!matches.length) return;
+        const feature = matches[0];
+        const properties = feature.properties || {};
+        if (properties.FAZENDA != null) document.getElementById('codFz').value = String(properties.FAZENDA);
+        if (properties.NOME_FAZ) document.getElementById('sigla').value = properties.NOME_FAZ;
+        if (properties.ZONA != null) document.getElementById('bloco').value = String(properties.ZONA);
+        const talhao = properties.TALHAO ?? properties.DESC_TALHA;
+        if (talhao != null) document.getElementById('talhao').value = String(talhao);
+
+        selectedShapeLayer = L.geoJSON({ type: 'FeatureCollection', features: matches }, {
+            style: { color: '#f97316', weight: 3, opacity: 1, fillColor: '#fb923c', fillOpacity: 0.3 }
+        }).addTo(map);
+        selectedShapeLayer.bringToFront();
     }
 
     function setMarker(lat, lng) {
@@ -91,6 +167,7 @@ const db = getFirestore(app);
         lngInput.value = lng;
         locationStatus.textContent = `Local: ${lat.toFixed(4)}, ${lng.toFixed(4)}`;
         locationStatus.style.color = 'var(--brand-green)';
+        showShapeForLocation();
     }
 
     // Initialize map
@@ -145,6 +222,7 @@ const db = getFirestore(app);
     let currentRecords = [];
     let currentVariedades = [];
     let currentPlantas = [];
+    let currentCortes = [];
 
     loadRecords();
 
@@ -161,6 +239,7 @@ const db = getFirestore(app);
             bloco: formData.get('bloco'),
             talhao: formData.get('talhao'),
             variedade: formData.get('variedade'),
+            corte: formData.get('corte'),
             plantaDaninha: formData.get('plantaDaninha'),
             latitude: formData.get('latitude'),
             longitude: formData.get('longitude'),
@@ -272,7 +351,7 @@ const db = getFirestore(app);
     });
 
     async function loadRecords() {
-        recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Carregando registros...</td></tr>';
+        recordsBody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Carregando registros...</td></tr>';
         
         try {
             const querySnapshot = await getDocs(collection(db, "levantamentos"));
@@ -288,7 +367,7 @@ const db = getFirestore(app);
             recordsBody.innerHTML = '';
             
             if (records.length === 0) {
-                recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: var(--text-muted);">Nenhum registro encontrado.</td></tr>';
+                recordsBody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: var(--text-muted);">Nenhum registro encontrado.</td></tr>';
                 return;
             }
 
@@ -321,6 +400,7 @@ const db = getFirestore(app);
                     <td>${record.bloco || ''}</td>
                     <td>${record.talhao || ''}</td>
                     <td>${record.variedade || ''}</td>
+                    <td>${record.corte || ''}</td>
                     <td>${record.plantaDaninha || ''}</td>
                     <td>${locationHtml}</td>
                     <td>${imageHtml}</td>
@@ -331,9 +411,97 @@ const db = getFirestore(app);
             });
         } catch (e) {
             console.error("Erro ao carregar registros", e);
-            recordsBody.innerHTML = '<tr><td colspan="10" style="text-align: center; color: red;">Erro ao carregar registros. Verifique sua conexão.</td></tr>';
+            recordsBody.innerHTML = '<tr><td colspan="11" style="text-align: center; color: red;">Erro ao carregar registros. Verifique sua conexão.</td></tr>';
         }
     }
+
+    // --- EXPORT EXCEL ---
+    document.getElementById('exportExcelBtn').addEventListener('click', async () => {
+        const btn = document.getElementById('exportExcelBtn');
+        if (!currentRecords.length) {
+            alert('Não há registros para exportar.');
+            return;
+        }
+        if (typeof ExcelJS === 'undefined') {
+            alert('Biblioteca de Excel não carregada. Verifique a conexão com a internet.');
+            return;
+        }
+        const originalHtml = btn.innerHTML;
+        btn.disabled = true;
+        btn.textContent = 'Gerando...';
+        try {
+            const workbook = new ExcelJS.Workbook();
+            const sheet = workbook.addWorksheet('Levantamentos');
+            sheet.columns = [
+                { header: 'Cód. FZ', key: 'codFz', width: 10 },
+                { header: 'Sigla', key: 'sigla', width: 16 },
+                { header: 'Bloco', key: 'bloco', width: 10 },
+                { header: 'Talhão', key: 'talhao', width: 10 },
+                { header: 'Variedade', key: 'variedade', width: 16 },
+                { header: 'Corte', key: 'corte', width: 12 },
+                { header: 'Planta Daninha', key: 'plantaDaninha', width: 20 },
+                { header: 'Latitude', key: 'latitude', width: 14 },
+                { header: 'Longitude', key: 'longitude', width: 14 },
+                { header: 'Localização (Link)', key: 'link', width: 22 },
+                { header: 'Imagem', key: 'imagem', width: 28 },
+                { header: 'Data', key: 'date', width: 18 }
+            ];
+            const header = sheet.getRow(1);
+            header.font = { bold: true, color: { argb: 'FFFFFFFF' } };
+            header.alignment = { vertical: 'middle', horizontal: 'center' };
+            header.height = 22;
+            header.eachCell(c => { c.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF166534' } }; });
+
+            currentRecords.forEach((r, i) => {
+                const row = sheet.addRow({
+                    codFz: r.codFz || '', sigla: r.sigla || '', bloco: r.bloco || '',
+                    talhao: r.talhao || '', variedade: r.variedade || '', corte: r.corte || '',
+                    plantaDaninha: r.plantaDaninha || '', latitude: r.latitude || '',
+                    longitude: r.longitude || '', link: '', imagem: '', date: r.date || ''
+                });
+                row.alignment = { vertical: 'middle', wrapText: true };
+
+                if (r.latitude && r.longitude) {
+                    row.getCell('link').value = {
+                        text: 'Ver no Mapa',
+                        hyperlink: `https://www.google.com/maps?q=${r.latitude},${r.longitude}`
+                    };
+                    row.getCell('link').font = { color: { argb: 'FF0563C1' }, underline: true };
+                }
+
+                if (r.image && r.image.startsWith('data:image')) {
+                    row.height = 110;
+                    const ext = r.image.startsWith('data:image/png') ? 'png' : 'jpeg';
+                    const imageId = workbook.addImage({ base64: r.image, extension: ext });
+                    sheet.addImage(imageId, {
+                        tl: { col: 10.05, row: i + 1.05 },
+                        ext: { width: 175, height: 140 }
+                    });
+                    row.height = 110;
+                } else {
+                    row.getCell('imagem').value = 'N/A';
+                }
+            });
+
+            const buffer = await workbook.xlsx.writeBuffer();
+            const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            const stamp = new Date().toISOString().slice(0, 10);
+            a.href = url;
+            a.download = `levantamento_erva_daninha_${stamp}.xlsx`;
+            document.body.appendChild(a);
+            a.click();
+            a.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        } catch (e) {
+            console.error('Erro ao exportar Excel', e);
+            alert('Erro ao exportar Excel.');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = originalHtml;
+        }
+    });
 
     // --- CRUD ACTIONS ---
     window.deleteRecord = async function(id) {
@@ -360,6 +528,7 @@ const db = getFirestore(app);
         document.getElementById('bloco').value = record.bloco || '';
         document.getElementById('talhao').value = record.talhao || '';
         document.getElementById('variedade').value = record.variedade || '';
+        document.getElementById('corte').value = record.corte || '';
         document.getElementById('plantaDaninha').value = record.plantaDaninha || '';
         
         // Handle Location
@@ -437,6 +606,32 @@ const db = getFirestore(app);
             });
             currentPlantas = plantasDaninhas;
 
+            const corteSnapshot = await getDocs(collection(db, "cortes"));
+            let cortes = [];
+            corteSnapshot.forEach(doc => {
+                cortes.push({ id: doc.id, nome: doc.data().nome });
+            });
+            currentCortes = cortes;
+
+            const listaCorte = document.getElementById('listaCorte');
+            listaCorte.innerHTML = '';
+            cortes.forEach(c => {
+                const li = document.createElement('li');
+                li.innerHTML = `<span>${c.nome}</span> <button class="btn-icon btn-delete" onclick="window.deleteCorte('${c.id}')">🗑️</button>`;
+                listaCorte.appendChild(li);
+            });
+
+            const selectCorte = document.getElementById('corte');
+            const currentCorte = selectCorte.value;
+            selectCorte.innerHTML = '<option value="" disabled selected>Selecione o Corte</option>';
+            cortes.forEach(c => {
+                const opt = document.createElement('option');
+                opt.value = c.nome;
+                opt.textContent = c.nome;
+                selectCorte.appendChild(opt);
+            });
+            if(currentCorte) selectCorte.value = currentCorte;
+
             // Populate lists
             const listaVariedade = document.getElementById('listaVariedade');
             listaVariedade.innerHTML = '';
@@ -499,6 +694,35 @@ const db = getFirestore(app);
             await loadCadastros();
         } catch (e) {
             console.error("Erro ao adicionar variedade", e);
+        }
+    }
+
+    window.addCorte = async function() {
+        const input = document.getElementById('novoCorte');
+        const val = input.value.trim();
+        if(!val) return;
+
+        if(currentCortes.find(c => c.nome.toLowerCase() === val.toLowerCase())) {
+            alert("Este corte já está cadastrado!");
+            return;
+        }
+
+        try {
+            await addDoc(collection(db, "cortes"), { nome: val });
+            input.value = '';
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao adicionar corte", e);
+        }
+    }
+
+    window.deleteCorte = async function(id) {
+        if(!confirm(`Remover este corte?`)) return;
+        try {
+            await deleteDoc(doc(db, "cortes", id));
+            await loadCadastros();
+        } catch (e) {
+            console.error("Erro ao remover", e);
         }
     }
 
